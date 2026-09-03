@@ -232,8 +232,10 @@ describe('API v1 middleware auth', function () {
     assert.strictEqual(response.status, 200);
     assert.strictEqual(nextCalled, true);
 
+    const stat = await env.img_url.get(`token_stat:${tokenInfo.id}`, { type: 'json' });
+    assert.ok(Number(stat?.lastUsedAt || 0) > 0);
     const tokenRecord = await env.img_url.get(`api_token:${tokenInfo.id}`, { type: 'json' });
-    assert.ok(Number(tokenRecord?.lastUsedAt || 0) > 0);
+    assert.ok(!tokenRecord || tokenRecord.lastUsedAt == null);
   });
 });
 

@@ -840,3 +840,68 @@ MIT License
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=katelya77/K-Vault&type=Date)](https://star-history.com/#katelya77/K-Vault&Date)
+
+---
+
+## API Token：机器凭据与 Agent 接入
+
+K-Vault 内置面向机器客户端（GitHub Actions、Coze Agent、ShareX、自动化脚本、未来 MCP Agent）的长期 API Token 体系，与网页登录态完全隔离。完整接入指南见 [docs/agent-integration.md](docs/agent-integration.md)，机器可读接口定义见 [docs/openapi.yaml](docs/openapi.yaml)。
+
+### 创建 Token
+
+- **网页**：登录管理后台 →「API Token 管理」→ 新建，可设置名称、scopes、过期时间与策略。
+- **Admin API**（未配置 `BASIC_USER`/`BASIC_PASS` 时 admin API fail-closed，返回 503）：
+
+```bash
+curl -X POST "https://your-kvault-domain/api/admin/tokens" \
+  -u "$BASIC_USER:$BASIC_PASS" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"blog-bot","scopes":["upload","read"],"policies":{"folderPrefix":"blog"}}'
+```
+
+响应中的 `token` 字段即完整密钥（`kvault_<id>_<secret>`），仅此一次返回，请立即妥善保存。轮换（rotate）后旧密钥立即失效。
+
+### Scopes 与策略
+
+| Scope | 能力 |
+| --- | --- |
+| `upload` | 上传文件 / URL 导入 |
+| `read` | 列出与读取文件 |
+| `delete` | 删除文件 |
+| `paste` | 创建 Paste |
+
+可选策略：`allowedStorages`（限定存储后端）、`folderPrefix`（限定目录前缀）、`maxFileSize`（单文件上限，界面按 MB 填写）。违规返回 403 `POLICY_DENIED` / 413 `POLICY_FILE_TOO_LARGE`。
+
+### 调用示例
+
+```bash
+# 上传文件（≤25MB 重复内容自动去重）
+curl -X POST "https://your-kvault-domain/api/v1/upload" \
+  -H "Authorization: Bearer $KVAULT_API_TOKEN" \
+  -H "Idempotency-Key: post-42-cover" \
+  -F "file=@./photo.png" -F "storage=telegram" -F "folderPath=blog/2026"
+
+# 远程 URL 导入（内置 SSRF 防护）
+curl -X POST "https://your-kvault-domain/api/v1/import" \
+  -H "Authorization: Bearer $KVAULT_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://cdn.example.com/cover.jpg","storage":"r2"}'
+
+# 列出 / 查询 / 删除
+curl -H "Authorization: Bearer $KVAULT_API_TOKEN" "https://your-kvault-domain/api/v1/files?limit=50"
+curl -H "Authorization: Bearer $KVAULT_API_TOKEN" "https://your-kvault-domain/api/v1/file/<id>/info"
+curl -X DELETE -H "Authorization: Bearer $KVAULT_API_TOKEN" "https://your-kvault-domain/api/v1/file/<id>"
+```
+
+重复携带同一 `Idempotency-Key` 的上传/导入会在 24 小时内返回首次响应（响应头 `Idempotency-Replayed: true`）。
+
+### 跨域配置：API_CORS_ORIGINS
+
+浏览器直连 API 的前端需要显式跨域白名单（服务端环境变量）：
+
+```
+API_CORS_ORIGINS=https://app.example.com,https://dashboard.example.com
+```
+
+- 逗号分隔，末尾斜杠自动归一化；未配置时不返回任何 CORS 头，纯服务端调用不受影响。
+- 预检（OPTIONS）仅放行白名单来源，允许 `Authorization`、`Content-Type`、`Idempotency-Key` 请求头。
