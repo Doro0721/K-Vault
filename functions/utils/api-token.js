@@ -467,9 +467,10 @@ export async function rotateApiToken(tokenId, env) {
 
 /**
  * Telemetry write (requirement #2). Writes ONLY the stat key with a 60s
- * sample debounce. Never touches the credential record.
+ * sample debounce (minIntervalMs can raise it, e.g. 1h in low-write mode).
+ * Never touches the credential record.
  */
-export async function touchApiTokenUsage(tokenId, env, { success = true, operation = '', client = '' } = {}) {
+export async function touchApiTokenUsage(tokenId, env, { success = true, operation = '', client = '', minIntervalMs = 0 } = {}) {
   try {
     ensureKvBinding(env);
     const id = sanitizeTokenId(tokenId);
@@ -478,7 +479,10 @@ export async function touchApiTokenUsage(tokenId, env, { success = true, operati
     const now = Date.now();
     const stat = (await getStat(id, env)) || {};
 
-    if (Number(stat.lastTouchAt || 0) > 0 && now - Number(stat.lastTouchAt || 0) < STAT_DEBOUNCE_MS) {
+    // Sampled write: skip inside the debounce window. Low-write mode callers
+    // may raise the effective interval (e.g. 1h with MINIMIZE_KV_WRITES=true).
+    const minInterval = Math.max(STAT_DEBOUNCE_MS, Math.max(0, Number(minIntervalMs) || 0));
+    if (Number(stat.lastTouchAt || 0) > 0 && now - Number(stat.lastTouchAt || 0) < minInterval) {
       return false; // sampled: skip write inside the debounce window
     }
 

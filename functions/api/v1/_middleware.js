@@ -8,6 +8,10 @@ import { apiError } from '../../utils/api-v1.js';
 import { handleApiPreflight, resolveCorsHeaders } from '../../utils/cors.js';
 import { writeAuditLog, AUDIT_EVENTS } from '../../utils/audit.js';
 
+// Low-write mode (MINIMIZE_KV_WRITES=true): token validation still reads KV,
+// but usage stats are persisted at most once per hour.
+const MINIMIZED_USAGE_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
+
 function resolveRequiredScope(request) {
   const pathname = new URL(request.url).pathname.replace(/\/+$/, '');
   const method = String(request.method || 'GET').toUpperCase();
@@ -113,7 +117,10 @@ export async function onRequest(context) {
   context.data.apiToken = verifyResult.token;
 
   // Telemetry: writes only the stat key, 60s sampled (requirement #2).
+  // Low-write mode: raise the telemetry sampling interval from 60s to 1h.
+  const minimizeKvWrites = env.MINIMIZE_KV_WRITES === 'true';
   const touchPromise = touchApiTokenUsage(verifyResult.token.id, env, {
+    minIntervalMs: minimizeKvWrites ? MINIMIZED_USAGE_UPDATE_INTERVAL_MS : 0,
     success: true,
     operation: `${request.method} ${new URL(request.url).pathname}`.slice(0, 64),
     client: clientTag(request),
