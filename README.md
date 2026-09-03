@@ -835,17 +835,20 @@ K-Vault 并非对上述项目的简单复制，而是在相关开源生态、社
 
 MIT License
 
----
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=katelya77/K-Vault&type=Date)](https://star-history.com/#katelya77/K-Vault&Date)
 
 ---
 
 ## API Token：机器凭据与 Agent 接入
 
-K-Vault 内置面向机器客户端（GitHub Actions、Coze Agent、ShareX、自动化脚本、未来 MCP Agent）的长期 API Token 体系，与网页登录态完全隔离。完整接入指南见 [docs/agent-integration.md](docs/agent-integration.md)，机器可读接口定义见 [docs/openapi.yaml](docs/openapi.yaml)。
+K-Vault 内置面向机器客户端（GitHub Actions、Coze Agent、ShareX、自动化脚本、未来 MCP Agent）的长期 API Token 体系，与网页登录态完全隔离。完整接入指南见 [docs/agent-integration.md](docs/agent-integration.md)，机器可读接口定义见 [docs/openapi.yaml](docs/openapi.yaml)。常用 curl 示例与 ShareX 图床配置见上方 [API 使用指南](#api-使用指南)。
+
+| 能力 | 说明 |
+| --- | --- |
+| 凭据隔离 | Token 与网页登录态完全隔离，可随时吊销或轮换 |
+| 最小授权 | `scopes` 按需授权 + `policies` 限定存储后端 / 目录 / 大小 |
+| 幂等重试 | `Idempotency-Key` 24 小时内自动去重，网络重试不产生重复文件 |
+| 安全防护 | 远程导入内置 SSRF 防护，管理面未配置凭据时 fail-closed |
+| 审计追踪 | 每次调用记录最后使用时间、操作类型与客户端标签 |
 
 ### 创建 Token
 
@@ -859,7 +862,7 @@ curl -X POST "https://your-kvault-domain/api/admin/tokens" \
   -d '{"name":"blog-bot","scopes":["upload","read"],"policies":{"folderPrefix":"blog"}}'
 ```
 
-响应中的 `token` 字段即完整密钥（`kvault_<id>_<secret>`），仅此一次返回，请立即妥善保存。轮换（rotate）后旧密钥立即失效。
+> ⚠️ **密钥仅此一次返回**：响应中的 `token` 字段即完整密钥（`kvault_<id>_<secret>`），创建后无法再次查看，请立即妥善保存。轮换（rotate）后旧密钥立即失效。
 
 ### Scopes 与策略
 
@@ -870,9 +873,17 @@ curl -X POST "https://your-kvault-domain/api/admin/tokens" \
 | `delete` | 删除文件 |
 | `paste` | 创建 Paste |
 
-可选策略：`allowedStorages`（限定存储后端）、`folderPrefix`（限定目录前缀）、`maxFileSize`（单文件上限，界面按 MB 填写）。违规返回 403 `POLICY_DENIED` / 413 `POLICY_FILE_TOO_LARGE`。
+可选策略（创建或编辑 Token 时按需组合）：
+
+- `allowedStorages`：限定可用存储后端，防止 Token 越权使用昂贵存储
+- `folderPrefix`：限定目录前缀，适合按业务线隔离文件
+- `maxFileSize`：单文件大小上限，管理界面按 MB 填写
+
+策略校验不通过时返回 `403 POLICY_DENIED` 或 `413 POLICY_FILE_TOO_LARGE`。
 
 ### 调用示例
+
+以下示例假设已导出环境变量 `KVAULT_API_TOKEN`（值为创建 Token 时保存的密钥），幂等键建议使用业务唯一标识（如内容哈希或文章编号）：
 
 ```bash
 # 上传文件（≤25MB 重复内容自动去重）
@@ -893,7 +904,7 @@ curl -H "Authorization: Bearer $KVAULT_API_TOKEN" "https://your-kvault-domain/ap
 curl -X DELETE -H "Authorization: Bearer $KVAULT_API_TOKEN" "https://your-kvault-domain/api/v1/file/<id>"
 ```
 
-重复携带同一 `Idempotency-Key` 的上传/导入会在 24 小时内返回首次响应（响应头 `Idempotency-Replayed: true`）。
+> 💡 重复携带同一 `Idempotency-Key` 的上传/导入会在 **24 小时内返回首次响应**（响应头 `Idempotency-Replayed: true`），网络抖动重试不会产生重复文件。
 
 ### 跨域配置：API_CORS_ORIGINS
 
@@ -905,3 +916,8 @@ API_CORS_ORIGINS=https://app.example.com,https://dashboard.example.com
 
 - 逗号分隔，末尾斜杠自动归一化；未配置时不返回任何 CORS 头，纯服务端调用不受影响。
 - 预检（OPTIONS）仅放行白名单来源，允许 `Authorization`、`Content-Type`、`Idempotency-Key` 请求头。
+---
+
+## Star History
+
+[![Star History Chart](https://star-history.dera.page/svg?repos=katelya77/K-Vault&type=Date)](https://star-history.dera.page/#katelya77/K-Vault&Date)
