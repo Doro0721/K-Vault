@@ -1,5 +1,5 @@
 import { onRequestPost as uploadInternal } from '../../upload.js';
-import { parseSignedTelegramFileId } from '../../utils/telegram.js';
+import { parseSignedTelegramFileId, shouldWriteTelegramMetadata } from '../../utils/telegram.js';
 import { checkUploadPolicy } from '../../utils/policy-enforce.js';
 import { apiError, apiSuccess, buildAbsoluteUrl, parsePositiveInt } from '../../utils/api-v1.js';
 
@@ -378,7 +378,14 @@ export async function onRequestPost(context) {
     return apiError('UPLOAD_FAILED', '上传响应中缺少文件标识。', 502);
   }
 
-  const lookup = await findRecordByFileId(env, publicId);
+  // Low-write mode: signed Telegram uploads skip the post-upload KV metadata
+  // probe entirely (password/expires_in/max_downloads/slug are ignored and
+  // no delete link is returned).
+  const signedTelegram = await parseSignedTelegramFileId(publicId, env);
+  const skipTelegramMetadata = Boolean(signedTelegram) && !shouldWriteTelegramMetadata(env);
+  const lookup = skipTelegramMetadata
+    ? null
+    : await findRecordByFileId(env, publicId);
   let metadata = lookup?.record?.metadata || {};
   if (lookup?.key) {
     try {
@@ -398,9 +405,9 @@ export async function onRequestPost(context) {
   }
 
   const canonicalId = lookup?.key || publicId;
-  const fileName = metadata.fileName || file.name || canonicalId;
-  const fileSize = Number(metadata.fileSize || file.size || 0);
-  const uploadedAtValue = Number(metadata.TimeStamp || Date.now());
+  const fileName = metadata.fileName || file.name || signedTelegram?.fileName || canonicalId;
+  const fileSize = Number(metadata.fileSize || signedTelegram?.fileSize || file.size || 0);
+  const uploadedAtValue = Number(metadata.TimeStamp || signedTelegram?.timestamp || Date.now());
   const shareSlug = lookup?.key
     ? (sanitizeSlug(metadata.shareSlug || '') || normalizedSlug)
     : '';
@@ -430,7 +437,9 @@ export async function onRequestPost(context) {
     links: {
       download: buildAbsoluteUrl(request, `/file/${encodeURIComponent(publicId)}`),
       share: buildAbsoluteUrl(request, `/s/${encodeURIComponent(shareId)}`),
-      delete: buildAbsoluteUrl(request, `/api/v1/file/${encodeURIComponent(canonicalId)}`),
+      delete: skipTelegramMetadata
+        ? null
+        : buildAbsoluteUrl(request, `/api/v1/file/${encodeURIComponent(canonicalId)}`),
     },
   });
 }
@@ -441,3 +450,4 @@ export async function onRequest(context) {
   }
   return onRequestPost(context);
 }
+
